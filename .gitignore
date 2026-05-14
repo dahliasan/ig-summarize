@@ -6,3 +6,7 @@ __pycache__/
 *.m4a
 ig-summarize-*/
 ig-sum-*/
+*.egg-info/
+dist/
+build/
+.venv/

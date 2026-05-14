@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ig-summarize"
+version = "0.1.3"
+description = "Instagram posts/reels: Instaloader → transcribe → optional OpenRouter summary"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+[project.scripts]
+ig-summarize = "ig_summarize.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ig_summarize*"]

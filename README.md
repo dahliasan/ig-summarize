@@ -1,58 +1,133 @@
 # ig-summarize
 
-Turn an **Instagram post or reel URL** into a **transcript** (speech-to-text) and, optionally, a **short summary** via [OpenRouter](https://openrouter.ai/). No Python dependencies beyond the standard library; bring your own [Instaloader](https://instaloader.github.io/), [ffmpeg](https://ffmpeg.org/), and OpenAI-compatible transcription helper.
+Turn an **Instagram post or reel URL** into a **transcript** (speech-to-text) and, optionally, a **short summary** via [OpenRouter](https://openrouter.ai/). Runtime uses only the Python standard library; you bring [Instaloader](https://instaloader.github.io/), [ffmpeg](https://ffmpeg.org/), and an OpenAI-compatible transcription helper.
 
-## Install
+## Prerequisites (not installed by this repo)
 
 ```bash
 pipx install instaloader   # recommended on macOS (PEP 668)
 # brew install ffmpeg
 ```
 
-Clone this repo and point `IG_SUMMARIZE_CLI` at the script (or call it by path).
-
 You also need the Codex **transcribe** helper `transcribe_diarize.py` (typically `~/.codex/skills/transcribe/scripts/transcribe_diarize.py`) or set `TRANSCRIBE_CLI` to that file.
+
+---
+
+## Setup (pick one)
+
+### A. **`pipx` (closest to “npm install -g”)** — recommended
+
+Installs a global **`ig-summarize`** command (isolated venv, upgrades with `pipx upgrade ig-summarize`).
+
+```bash
+pipx install "git+https://github.com/dahliasan/ig-summarize.git"
+# or from a local clone:
+cd /path/to/ig-summarize
+pipx install .
+```
+
+Then run:
+
+```bash
+ig-summarize config path
+ig-summarize "https://www.instagram.com/p/SHORTCODE/"
+```
+
+You do **not** need `IG_SUMMARIZE_CLI` when using this path.
+
+### B. **Git clone + repo launcher (no pip install)**
+
+```bash
+git clone https://github.com/dahliasan/ig-summarize.git
+cd ig-summarize
+chmod +x ig-summarize
+./ig-summarize config path
+```
+
+Or add the repo to `PATH` and run `ig-summarize` from anywhere:
+
+```bash
+export PATH="/path/to/ig-summarize:$PATH"
+ig-summarize config path
+```
+
+### C. **`python3` against the script file (advanced)**
+
+Use this only if you point at the **actual script file**, not your home directory.
+
+```bash
+python3 /path/to/ig-summarize/scripts/ig_summarize.py config path
+```
+
+Optional env var (must be a **file path ending in `.py`**):
+
+```bash
+export IG_SUMMARIZE_CLI="/path/to/ig-summarize/scripts/ig_summarize.py"
+python3 "$IG_SUMMARIZE_CLI" config path
+```
+
+### D. **`python -m` from a clone**
+
+```bash
+cd /path/to/ig-summarize
+python3 -m ig_summarize config path
+```
+
+---
 
 ## Usage
 
 ```bash
 export OPENAI_API_KEY="…"   # required for transcription
-export IG_SUMMARIZE_CLI="$PWD/scripts/ig_summarize.py"
 
-python3 "$IG_SUMMARIZE_CLI" "https://www.instagram.com/p/SHORTCODE/"
+ig-summarize "https://www.instagram.com/p/SHORTCODE/"
 
 # Keep Instaloader output under ./ig-summarize-<shortcode>/
-python3 "$IG_SUMMARIZE_CLI" "https://www.instagram.com/p/SHORTCODE/" --keep
+ig-summarize "https://www.instagram.com/p/SHORTCODE/" --keep
 
 # Pin all artifacts under one directory
-python3 "$IG_SUMMARIZE_CLI" "https://www.instagram.com/p/SHORTCODE/" --out-dir ./out
+ig-summarize "https://www.instagram.com/p/SHORTCODE/" --out-dir ./out
 
 # Summary (uses OPENROUTER_API_KEY or ~/.config/ig-summarize/config.json)
-python3 "$IG_SUMMARIZE_CLI" "https://www.instagram.com/p/SHORTCODE/" --summary
+ig-summarize "https://www.instagram.com/p/SHORTCODE/" --summary
 ```
+
+If you did not use `pipx` and did not add the repo to `PATH`, replace `ig-summarize` with `./ig-summarize` or `python3 path/to/scripts/ig_summarize.py` as in the setup section.
+
+---
 
 ## OpenRouter API key (config file)
 
 Keys are stored under **`~/.config/ig-summarize/config.json`** (or `$XDG_CONFIG_HOME/ig-summarize/config.json`). The file is written with mode **`0600`**. **`OPENROUTER_API_KEY` in the environment always overrides** the file when set.
 
 ```bash
-# Save key from your environment (good for one-liner setup)
 export OPENROUTER_API_KEY="sk-or-…"
-python3 "$IG_SUMMARIZE_CLI" config save-openrouter --from-env
+ig-summarize config save-openrouter --from-env
 
-# Or paste at a prompt (stdin stays empty)
-python3 "$IG_SUMMARIZE_CLI" config save-openrouter
+# Or paste at a prompt
+ig-summarize config save-openrouter
 
 # Or pipe (avoid shell history)
-python3 "$IG_SUMMARIZE_CLI" config save-openrouter < /path/to/keyfile
+ig-summarize config save-openrouter < /path/to/keyfile
 
-# Show resolved config path
-python3 "$IG_SUMMARIZE_CLI" config path
+ig-summarize config path
 ```
 
-After saving, you can run **`--summary`** without exporting `OPENROUTER_API_KEY` each session.
+---
 
-By default, without `--keep` or `--out-dir`, media is downloaded to a temp folder that is deleted after success; `SHORTCODE.transcript.txt` is written in the **current directory**.
+## Troubleshooting
+
+### `can't find '__main__' module in '/Users/…'`
+
+Python is trying to run a **directory** (usually **`$HOME`**) as the script. That almost always means **`IG_SUMMARIZE_CLI` is wrong**: empty, unset, or set to `$HOME` / `~` instead of the **`.py` file**.
+
+**Fix:** unset it and use `pipx` / `./ig-summarize`, or set it to the full path of `scripts/ig_summarize.py` (see setup C).
+
+```bash
+unset IG_SUMMARIZE_CLI
+```
+
+---
 
 ## How it works
 
@@ -73,10 +148,11 @@ By default, without `--keep` or `--out-dir`, media is downloaded to a temp folde
 | `CODEX_HOME` | Base for default transcribe helper (default `~/.codex`). |
 | `INSTALOADER_BIN`, `FFMPEG_BIN`, `PYTHON_BIN` | Override binaries on PATH. |
 | `OPENROUTER_MODEL`, `OPENROUTER_HTTP_REFERER`, `OPENROUTER_APP_TITLE` | OpenRouter defaults. |
+| `IG_SUMMARIZE_CLI` | Optional; only if you invoke `python3 "$IG_SUMMARIZE_CLI" …` — must be the **script file path**, not `$HOME`. |
 
 ## Cursor skill
 
-See [`SKILL.md`](./SKILL.md) for agent-oriented instructions (same workflow, `IG_SUMMARIZE_CLI`).
+See [`SKILL.md`](./SKILL.md).
 
 ## Limits and caveats
 

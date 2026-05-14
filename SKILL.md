@@ -21,22 +21,26 @@ Use when the user wants a **transcript** or **optional summary** of an **Instagr
 4. **`transcribe_diarize.py`** at `~/.codex/skills/transcribe/scripts/` or `TRANSCRIBE_CLI`.
 5. Optional OpenRouter key: **`OPENROUTER_API_KEY`** or save with **`config save-openrouter`** to `~/.config/ig-summarize/config.json` (env overrides file).
 
-## CLI path
+## CLI
+
+Prefer the global command after **`pipx install .`** or **`pipx install git+https://github.com/dahliasan/ig-summarize.git`**:
 
 ```bash
-export IG_SUMMARIZE_CLI="${IG_SUMMARIZE_CLI:-$HOME/projects/ig-summarize/scripts/ig_summarize.py}"
-# or clone path:
-# export IG_SUMMARIZE_CLI="$HOME/src/ig-summarize/scripts/ig_summarize.py"
+ig-summarize "https://www.instagram.com/p/SHORTCODE/"
 ```
+
+From a clone without install: **`./ig-summarize`** (repo root) or **`python3 -m ig_summarize`** from the repo directory.
+
+Only if you shell-wrap **`python3 "$IG_SUMMARIZE_CLI" …`**: `IG_SUMMARIZE_CLI` must be the **full path to `scripts/ig_summarize.py`**, never `$HOME` or a directory (otherwise Python raises `can't find '__main__' module in '/Users/…'`).
 
 ## Commands
 
 ```bash
-python3 "$IG_SUMMARIZE_CLI" "https://www.instagram.com/p/SHORTCODE/"
-python3 "$IG_SUMMARIZE_CLI" "https://www.instagram.com/p/SHORTCODE/" --keep
-python3 "$IG_SUMMARIZE_CLI" "https://www.instagram.com/p/SHORTCODE/" --out-dir ./out
-python3 "$IG_SUMMARIZE_CLI" config save-openrouter --from-env   # after OPENROUTER_API_KEY is set
-python3 "$IG_SUMMARIZE_CLI" "https://www.instagram.com/p/SHORTCODE/" --summary
+ig-summarize "https://www.instagram.com/p/SHORTCODE/"
+ig-summarize "https://www.instagram.com/p/SHORTCODE/" --keep
+ig-summarize "https://www.instagram.com/p/SHORTCODE/" --out-dir ./out
+ig-summarize config save-openrouter --from-env   # after OPENROUTER_API_KEY is set
+ig-summarize "https://www.instagram.com/p/SHORTCODE/" --summary
 ```
 
 ## Failure handling
