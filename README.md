@@ -27,10 +27,30 @@ python3 "$IG_SUMMARIZE_CLI" "https://www.instagram.com/p/SHORTCODE/" --keep
 # Pin all artifacts under one directory
 python3 "$IG_SUMMARIZE_CLI" "https://www.instagram.com/p/SHORTCODE/" --out-dir ./out
 
-# Summary (default OpenRouter model: openrouter/free)
-export OPENROUTER_API_KEY="…"
+# Summary (uses OPENROUTER_API_KEY or ~/.config/ig-summarize/config.json)
 python3 "$IG_SUMMARIZE_CLI" "https://www.instagram.com/p/SHORTCODE/" --summary
 ```
+
+## OpenRouter API key (config file)
+
+Keys are stored under **`~/.config/ig-summarize/config.json`** (or `$XDG_CONFIG_HOME/ig-summarize/config.json`). The file is written with mode **`0600`**. **`OPENROUTER_API_KEY` in the environment always overrides** the file when set.
+
+```bash
+# Save key from your environment (good for one-liner setup)
+export OPENROUTER_API_KEY="sk-or-…"
+python3 "$IG_SUMMARIZE_CLI" config save-openrouter --from-env
+
+# Or paste at a prompt (stdin stays empty)
+python3 "$IG_SUMMARIZE_CLI" config save-openrouter
+
+# Or pipe (avoid shell history)
+python3 "$IG_SUMMARIZE_CLI" config save-openrouter < /path/to/keyfile
+
+# Show resolved config path
+python3 "$IG_SUMMARIZE_CLI" config path
+```
+
+After saving, you can run **`--summary`** without exporting `OPENROUTER_API_KEY` each session.
 
 By default, without `--keep` or `--out-dir`, media is downloaded to a temp folder that is deleted after success; `SHORTCODE.transcript.txt` is written in the **current directory**.
 
@@ -41,14 +61,14 @@ By default, without `--keep` or `--out-dir`, media is downloaded to a temp folde
 3. Take the **largest `.mp4`** (handles carousels).
 4. **ffmpeg** extracts mono AAC for the transcription API.
 5. **`transcribe_diarize.py … --stdout`** produces the transcript.
-6. With **`--summary`**, call OpenRouter **`/api/v1/chat/completions`** (default model **`openrouter/free`**, overridable with `--openrouter-model` or `OPENROUTER_MODEL`).
+6. With **`--summary`**, resolve OpenRouter key from **`OPENROUTER_API_KEY`** (if set) else **`openrouter_api_key`** in **`~/.config/ig-summarize/config.json`**, then call OpenRouter **`/api/v1/chat/completions`** (default model **`openrouter/free`**).
 
 ## Environment
 
 | Variable | Role |
 |----------|------|
 | `OPENAI_API_KEY` | Required for transcription. |
-| `OPENROUTER_API_KEY` | Required when using `--summary`. |
+| `OPENROUTER_API_KEY` | Optional if key is in `~/.config/ig-summarize/config.json`; when set, **overrides** the file. |
 | `TRANSCRIBE_CLI` | Path to `transcribe_diarize.py` if not under `~/.codex/skills/transcribe/scripts/`. |
 | `CODEX_HOME` | Base for default transcribe helper (default `~/.codex`). |
 | `INSTALOADER_BIN`, `FFMPEG_BIN`, `PYTHON_BIN` | Override binaries on PATH. |

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import os
 import re
@@ -14,7 +15,7 @@ import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 INSTAGRAM_URL_RE = re.compile(
     r"(?:https?://)?(?:www\.)?(?:instagram\.com|instagr\.am)/(?:p|reel|reels|tv)/([^/?#]+)",
@@ -25,6 +26,99 @@ DEFAULT_OPENROUTER_MODEL = "openrouter/free"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_OPENROUTER_REFERER = "https://github.com/dahliasan/ig-summarize"
 DEFAULT_OPENROUTER_TITLE = "ig-summarize"
+
+
+def config_dir() -> Path:
+    xdg = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    if xdg:
+        return Path(xdg).expanduser() / "ig-summarize"
+    return Path.home() / ".config" / "ig-summarize"
+
+
+def config_path() -> Path:
+    return config_dir() / "config.json"
+
+
+def load_user_config() -> Dict[str, Any]:
+    path = config_path()
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def resolve_openrouter_api_key() -> Optional[str]:
+    env = os.getenv("OPENROUTER_API_KEY", "").strip()
+    if env:
+        return env
+    key = str(load_user_config().get("openrouter_api_key", "")).strip()
+    return key or None
+
+
+def write_user_config(updates: Dict[str, Any]) -> Path:
+    path = config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    merged: Dict[str, Any] = dict(load_user_config())
+    merged.update(updates)
+    tmp = path.with_suffix(".json.tmp")
+    data = json.dumps(merged, indent=2, sort_keys=True) + "\n"
+    tmp.write_text(data, encoding="utf-8")
+    tmp.replace(path)
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+    return path
+
+
+def read_openrouter_key_for_save(from_env: bool) -> str:
+    if from_env:
+        key = os.getenv("OPENROUTER_API_KEY", "").strip()
+        if not key:
+            die("OPENROUTER_API_KEY is empty or unset (used with --from-env).")
+        return key
+    if not sys.stdin.isatty():
+        key = sys.stdin.read().strip()
+        if key:
+            return key
+    env_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    if env_key:
+        return env_key
+    key = getpass.getpass("OpenRouter API key: ").strip()
+    if not key:
+        die("No API key provided.")
+    return key
+
+
+def run_config_command(argv: list[str]) -> None:
+    p = argparse.ArgumentParser(prog="ig-summarize config")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    p_save = sub.add_parser(
+        "save-openrouter",
+        help="Write OPENROUTER_API_KEY to ~/.config/ig-summarize/config.json (mode 0600).",
+    )
+    p_save.add_argument(
+        "--from-env",
+        action="store_true",
+        help="Read the key from OPENROUTER_API_KEY instead of stdin / prompt.",
+    )
+
+    p_path = sub.add_parser("path", help="Print the config file path and exit.")
+
+    args = p.parse_args(argv)
+    if args.cmd == "path":
+        print(config_path())
+        return
+    if args.cmd == "save-openrouter":
+        key = read_openrouter_key_for_save(from_env=args.from_env)
+        out = write_user_config({"openrouter_api_key": key})
+        print(f"Saved OpenRouter API key to {out} (permissions 0600).")
+        return
+    die(f"Unknown config command: {args.cmd}")
 
 
 def die(msg: str, code: int = 1) -> None:
@@ -212,6 +306,12 @@ def parse_args() -> argparse.Namespace:
             "Download Instagram post/reel media with Instaloader, transcribe audio via "
             "the transcribe_diarize OpenAI helper, and optionally summarize with OpenRouter."
         ),
+        epilog=(
+            "Manage OpenRouter key on disk: "
+            "`%(prog)s config save-openrouter` or `%(prog)s config path`. "
+            "Environment OPENROUTER_API_KEY overrides the config file when set."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument(
         "target",
@@ -220,7 +320,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--summary",
         action="store_true",
-        help="Also call OpenRouter to summarize the transcript (needs OPENROUTER_API_KEY).",
+        help=(
+            "Also call OpenRouter to summarize the transcript. Uses OPENROUTER_API_KEY "
+            "if set, else openrouter_api_key from ~/.config/ig-summarize/config.json "
+            "(see: ig-summarize config save-openrouter)."
+        ),
     )
     p.add_argument(
         "--openrouter-model",
@@ -307,9 +411,12 @@ def main() -> None:
     print(f"Wrote transcript: {transcript_path}")
 
     if args.summary:
-        key = os.getenv("OPENROUTER_API_KEY", "").strip()
+        key = resolve_openrouter_api_key()
         if not key:
-            die("OPENROUTER_API_KEY is not set (required when using --summary).")
+            die(
+                "No OpenRouter API key found. Set OPENROUTER_API_KEY, or run "
+                "`ig-summarize config save-openrouter` (see --help)."
+            )
         summary = openrouter_summarize(
             api_key=key,
             model=args.openrouter_model,
@@ -332,4 +439,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    rest = sys.argv[1:]
+    if rest and rest[0] == "config":
+        run_config_command(rest[1:])
+    else:
+        main()
