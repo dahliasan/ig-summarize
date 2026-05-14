@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ig-summarize"
-version = "0.1.4"
-description = "Instagram posts/reels: Instaloader → transcribe → optional OpenRouter summary"
+version = "0.2.0"
+description = "Instagram posts/reels: Instaloader → Summarize-style STT → optional OpenRouter summary"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }

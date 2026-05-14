@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ig-summarize: download an Instagram post/reel, transcribe audio, optionally summarize via OpenRouter."""
+"""ig-summarize: download an Instagram post/reel, transcribe (Summarize-style), optionally summarize via OpenRouter."""
 
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+from ig_summarize.transcribe import TranscriptionError, transcribe_auto
 
 INSTAGRAM_URL_RE = re.compile(
     r"(?:https?://)?(?:www\.)?(?:instagram\.com|instagr\.am)/(?:p|reel|reels|tv)/([^/?#]+)",
@@ -265,22 +267,26 @@ def which_or_env(binary: str, env_var: str) -> str:
     return found
 
 
-def transcribe_cli_path() -> Path:
-    explicit = os.environ.get("TRANSCRIBE_CLI", "").strip()
-    if explicit:
-        p = Path(explicit).expanduser()
-        if p.is_file():
-            return p
-        die(f"TRANSCRIBE_CLI is not a file: {explicit}")
-    codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser()
-    candidate = codex_home / "skills" / "transcribe" / "scripts" / "transcribe_diarize.py"
-    if candidate.is_file():
-        return candidate
-    die(
-        "Transcribe helper not found. Install the transcribe skill under "
-        f"{codex_home}/skills/transcribe/scripts/transcribe_diarize.py or set TRANSCRIBE_CLI."
-    )
-    return candidate
+def extract_audio_ffmpeg(ffmpeg: str, video: Path, audio_out: Path) -> None:
+    """16 kHz mono WAV for whisper-cli + cloud STT APIs."""
+    cmd = [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(video),
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-c:a",
+        "pcm_s16le",
+        str(audio_out),
+    ]
+    subprocess.run(cmd, check=True)
 
 
 def find_largest_mp4(root: Path) -> Optional[Path]:
@@ -308,47 +314,6 @@ def run_instaloader(instaloader: str, shortcode: str, cwd: Path, extra_args: lis
         f"-{shortcode}",
     ]
     subprocess.run(cmd, cwd=str(cwd), check=True)
-
-
-def extract_audio_ffmpeg(ffmpeg: str, video: Path, audio_out: Path) -> None:
-    cmd = [
-        ffmpeg,
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
-        "-i",
-        str(video),
-        "-vn",
-        "-ac",
-        "1",
-        "-ar",
-        "44100",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "128k",
-        str(audio_out),
-    ]
-    subprocess.run(cmd, check=True)
-
-
-def run_transcribe(python: str, transcribe_py: Path, audio: Path) -> str:
-    cmd = [
-        python,
-        str(transcribe_py),
-        str(audio),
-        "--stdout",
-    ]
-    proc = subprocess.run(
-        cmd,
-        check=True,
-        text=True,
-        capture_output=True,
-    )
-    if proc.stderr:
-        sys.stderr.write(proc.stderr)
-    return proc.stdout
 
 
 def openrouter_summarize(
@@ -411,8 +376,9 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="ig-summarize",
         description=(
-            "Download Instagram post/reel media with Instaloader, transcribe audio via "
-            "the transcribe_diarize OpenAI helper, and optionally summarize with OpenRouter."
+            "Download Instagram post/reel media with Instaloader, transcribe audio "
+            "(Summarize-style: whisper-cli → Groq → AssemblyAI → OpenAI), optionally "
+            "summarize with OpenRouter."
         ),
         epilog=(
             "Config: `%(prog)s config save-openrouter`, `config refresh-free`, `config set-model`, "
@@ -476,14 +442,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    if not os.getenv("OPENAI_API_KEY"):
-        die("OPENAI_API_KEY is not set (required for transcription).")
 
     shortcode = extract_shortcode(args.target)
     instaloader = which_or_env("instaloader", "INSTALOADER_BIN")
     ffmpeg = which_or_env("ffmpeg", "FFMPEG_BIN")
-    python = which_or_env("python3", "PYTHON_BIN")
-    transcribe_py = transcribe_cli_path()
 
     staging_ephemeral = False
     if args.out_dir:
@@ -515,10 +477,14 @@ def main() -> None:
     if not video:
         die("No .mp4 found after download. This post may be image-only or blocked.")
 
-    audio = staging / f"{shortcode}.m4a"
+    audio = staging / f"{shortcode}.wav"
     extract_audio_ffmpeg(ffmpeg, video, audio)
 
-    transcript_text = run_transcribe(python, transcribe_py, audio)
+    try:
+        transcript_text, provider = transcribe_auto(audio, staging)
+    except TranscriptionError as e:
+        die(str(e))
+    warn(f"Transcription provider: {provider}")
     transcript_path = artifact_dir / f"{shortcode}.transcript.txt"
     transcript_path.write_text(transcript_text, encoding="utf-8")
     print(f"Wrote transcript: {transcript_path}")

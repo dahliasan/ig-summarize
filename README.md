@@ -1,137 +1,106 @@
 # ig-summarize
 
-Turn an **Instagram post or reel URL** into a **transcript** (speech-to-text) and, optionally, a **short summary** via [OpenRouter](https://openrouter.ai/). Runtime uses only the Python standard library; you bring [Instaloader](https://instaloader.github.io/), [ffmpeg](https://ffmpeg.org/), and an OpenAI-compatible transcription helper.
+Turn an **Instagram post or reel URL** into a **transcript** and, optionally, a **short summary** via [OpenRouter](https://openrouter.ai/). One command does **download → extract audio → transcribe → (optional) summarize**, similar in spirit to [steipete/summarize](https://github.com/steipete/summarize).
 
-## Prerequisites (not installed by this repo)
-
-```bash
-pipx install instaloader   # recommended on macOS (PEP 668)
-# brew install ffmpeg
-```
-
-You also need the Codex **transcribe** helper `transcribe_diarize.py` (typically `~/.codex/skills/transcribe/scripts/transcribe_diarize.py`) or set `TRANSCRIBE_CLI` to that file.
+Runtime uses **Python’s standard library only** (plus your installed **`instaloader`** and **`ffmpeg`**).
 
 ---
 
-## Setup (pick one)
+## Prerequisites
 
-### A. **`pipx` (closest to “npm install -g”)** — recommended
+```bash
+pipx install instaloader
+brew install ffmpeg
+```
 
-Installs a global **`ig-summarize`** command (isolated venv, upgrades with `pipx upgrade ig-summarize`).
+---
+
+## Install `ig-summarize`
 
 ```bash
 pipx install "git+https://github.com/dahliasan/ig-summarize.git"
-# or from a local clone:
-cd /path/to/ig-summarize
-pipx install .
+# or from a clone:
+cd /path/to/ig-summarize && pipx install .
 ```
 
-Then run:
+Then use the global command **`ig-summarize`**.
 
-```bash
-ig-summarize config path
-ig-summarize "https://www.instagram.com/p/SHORTCODE/"
-```
-
-You do **not** need `IG_SUMMARIZE_CLI` when using this path.
-
-### B. **Git clone + repo launcher (no pip install)**
-
-```bash
-git clone https://github.com/dahliasan/ig-summarize.git
-cd ig-summarize
-chmod +x ig-summarize
-./ig-summarize config path
-```
-
-Or add the repo to `PATH` and run `ig-summarize` from anywhere:
-
-```bash
-export PATH="/path/to/ig-summarize:$PATH"
-ig-summarize config path
-```
-
-### C. **`python3` against the script file (advanced)**
-
-Use this only if you point at the **actual script file**, not your home directory.
-
-```bash
-python3 /path/to/ig-summarize/scripts/ig_summarize.py config path
-```
-
-Optional env var (must be a **file path ending in `.py`**):
-
-```bash
-export IG_SUMMARIZE_CLI="/path/to/ig-summarize/scripts/ig_summarize.py"
-python3 "$IG_SUMMARIZE_CLI" config path
-```
-
-### D. **`python -m` from a clone**
-
-```bash
-cd /path/to/ig-summarize
-python3 -m ig_summarize config path
-```
+**Without pipx:** clone the repo, `chmod +x ig-summarize`, run `./ig-summarize …`, or `python3 -m ig_summarize …` from the repo root.
 
 ---
 
-## Usage
+## Transcription (same *idea* as Summarize)
 
-```bash
-export OPENAI_API_KEY="…"   # required for transcription
+[`summarize`’s README](https://github.com/steipete/summarize) describes Whisper fallback order for media:
 
-ig-summarize "https://www.instagram.com/p/SHORTCODE/"
+> Prefers local **whisper.cpp** when installed + model available.  
+> Otherwise uses cloud transcription in this order: **Groq** → **AssemblyAI** → **Gemini** → **OpenAI** → **FAL**.
 
-# Keep Instaloader output under ./ig-summarize-<shortcode>/
-ig-summarize "https://www.instagram.com/p/SHORTCODE/" --keep
+**`ig-summarize`** implements the same **first four** tiers (no Gemini/FAL yet), using **the same env names Summarize documents for whisper.cpp**:
 
-# Pin all artifacts under one directory
-ig-summarize "https://www.instagram.com/p/SHORTCODE/" --out-dir ./out
+| Order | Provider | What you need |
+|------:|----------|----------------|
+| 1 | **Local `whisper-cli`** | `whisper-cli` on `PATH` (Homebrew: `brew install whisper-cpp`), plus **`SUMMARIZE_WHISPER_CPP_MODEL_PATH`** pointing at a `.gguf` / `.bin` model file. Optional: **`SUMMARIZE_WHISPER_CPP_BINARY`**, or disable with **`SUMMARIZE_DISABLE_LOCAL_WHISPER_CPP=1`**. |
+| 2 | **Groq** | **`GROQ_API_KEY`** (OpenAI-compatible Whisper API). Optional: **`IG_GROQ_TRANSCRIBE_MODEL`** (default `whisper-large-v3`). |
+| 3 | **AssemblyAI** | **`ASSEMBLYAI_API_KEY`** |
+| 4 | **OpenAI** | **`OPENAI_API_KEY`**. Optional: **`OPENAI_WHISPER_BASE_URL`** (default `https://api.openai.com/v1`), **`IG_OPENAI_TRANSCRIBE_MODEL`** (default `whisper-1`). |
 
-# Summary (uses OPENROUTER_API_KEY or ~/.config/ig-summarize/config.json)
-ig-summarize "https://www.instagram.com/p/SHORTCODE/" --summary
-```
+Audio is extracted as **16 kHz mono WAV** so **`whisper-cli`** and cloud APIs stay happy.
 
-If you did not use `pipx` and did not add the repo to `PATH`, replace `ig-summarize` with `./ig-summarize` or `python3 path/to/scripts/ig_summarize.py` as in the setup section.
+You only need **one** working path from the table (Groq alone is enough for a zero-local setup).
 
 ---
 
-## OpenRouter API key (config file)
+## Summarization (OpenRouter)
 
-Keys are stored under **`~/.config/ig-summarize/config.json`** (or `$XDG_CONFIG_HOME/ig-summarize/config.json`). The file is written with mode **`0600`**. **`OPENROUTER_API_KEY` in the environment always overrides** the file when set.
+**`--summary`** calls OpenRouter chat completions. Default model: **`openrouter/free`**. Override with **`--openrouter-model`**, **`OPENROUTER_MODEL`**, or **`ig-summarize config set-model`**.
+
+Save API key once:
 
 ```bash
-export OPENROUTER_API_KEY="sk-or-…"
+export OPENROUTER_API_KEY="…"
 ig-summarize config save-openrouter --from-env
-
-# Or paste at a prompt
-ig-summarize config save-openrouter
-
-# Or pipe (avoid shell history)
-ig-summarize config save-openrouter < /path/to/keyfile
-
-ig-summarize config path
 ```
 
----
-
-## Summarization model (OpenRouter)
-
-**Default for `--summary`:** **`openrouter/free`** — OpenRouter’s free-tier **router** (not one fixed weights snapshot).
-
-**Precedence (highest first):** `--openrouter-model` → **`OPENROUTER_MODEL`** → **`openrouter_model`** in `~/.config/ig-summarize/config.json` (via **`ig-summarize config set-model`**) → **`openrouter/free`**.
-
-Shorthand: **`--openrouter-model free`** means **`openrouter/free`**.
-
-### Like `summarize refresh-free` ([install.md](https://github.com/steipete/summarize/blob/main/docs/install.md))
-
-After you set **`OPENROUTER_API_KEY`**, Summarize recommends **`summarize refresh-free`** to refresh the free-model preset. **`ig-summarize config refresh-free`** does a **lighter** step: it calls OpenRouter’s public **`/api/v1/models`** endpoint (no key required), finds models with **listed $0** prompt and completion pricing, and stores **`openrouter_free_model_ids`** plus a timestamp in your config. It does **not** run summarize-style latency probes or ranking.
+Refresh cached free model ids (list-only, like Summarize’s `refresh-free` concept):
 
 ```bash
 ig-summarize config refresh-free
 ig-summarize config list-free
-ig-summarize config set-model google/gemma-3-4b-it:free   # example pinned default
 ```
+
+---
+
+## One-shot usage
+
+```bash
+# Transcript only (needs one transcription provider from the table above)
+ig-summarize "https://www.instagram.com/p/SHORTCODE/"
+
+# Transcript + summary (add OpenRouter key via env or config save-openrouter)
+ig-summarize "https://www.instagram.com/p/SHORTCODE/" --summary
+```
+
+Artifacts: by default, **`SHORTCODE.transcript.txt`** in the current directory (and **`SHORTCODE.summary.txt`** with `--summary`). Use **`--keep`** or **`--out-dir`** to keep downloads.
+
+---
+
+## Environment cheat sheet
+
+| Variable | Role |
+|----------|------|
+| `GROQ_API_KEY` | Cloud transcription (preferred cloud tier in `ig-summarize`). |
+| `ASSEMBLYAI_API_KEY` | Cloud transcription fallback. |
+| `OPENAI_API_KEY` | Cloud transcription fallback; also used if only OpenAI is set. |
+| `OPENAI_WHISPER_BASE_URL` | Custom OpenAI-compatible STT endpoint. |
+| `SUMMARIZE_WHISPER_CPP_MODEL_PATH` | Local whisper model file (same as Summarize). |
+| `SUMMARIZE_WHISPER_CPP_BINARY` | Local binary override (same as Summarize). |
+| `SUMMARIZE_DISABLE_LOCAL_WHISPER_CPP` | Set to `1` to skip local whisper. |
+| `OPENROUTER_API_KEY` | Summary step; optional if saved in config. |
+| `OPENROUTER_MODEL` | Default summary model override. |
+| `INSTALOADER_BIN`, `FFMPEG_BIN` | Binary overrides. |
+
+`IG_*` aliases exist for a few vars (see `ig_summarize/transcribe.py`).
 
 ---
 
@@ -139,47 +108,15 @@ ig-summarize config set-model google/gemma-3-4b-it:free   # example pinned defau
 
 ### `can't find '__main__' module in '/Users/…'`
 
-Python is trying to run a **directory** (usually **`$HOME`**) as the script. That almost always means **`IG_SUMMARIZE_CLI` is wrong**: empty, unset, or set to `$HOME` / `~` instead of the **`.py` file**.
-
-**Fix:** unset it and use `pipx` / `./ig-summarize`, or set it to the full path of `scripts/ig_summarize.py` (see setup C).
-
-```bash
-unset IG_SUMMARIZE_CLI
-```
+You pointed **`IG_SUMMARIZE_CLI`** at a directory (often `$HOME`). Use **`pipx install`**, or set the var to the **`.py` file** path. Prefer: **`pipx install`** and run **`ig-summarize`** with no env var.
 
 ---
 
-## How it works
+## Limits
 
-1. Parse the **shortcode** from `/p/`, `/reel/`, `/reels/`, or `/tv/` URLs (or pass the shortcode alone).
-2. Run **Instaloader**: `instaloader -q … -- -<shortcode>` (see Instaloader docs).
-3. Take the **largest `.mp4`** (handles carousels).
-4. **ffmpeg** extracts mono AAC for the transcription API.
-5. **`transcribe_diarize.py … --stdout`** produces the transcript.
-6. With **`--summary`**, call OpenRouter chat completions using the **resolved model** (default **`openrouter/free`**; see README “Summarization model”).
-
-## Environment
-
-| Variable | Role |
-|----------|------|
-| `OPENAI_API_KEY` | Required for transcription. |
-| `OPENROUTER_API_KEY` | Optional if key is in `~/.config/ig-summarize/config.json`; when set, **overrides** the file. |
-| `TRANSCRIBE_CLI` | Path to `transcribe_diarize.py` if not under `~/.codex/skills/transcribe/scripts/`. |
-| `CODEX_HOME` | Base for default transcribe helper (default `~/.codex`). |
-| `INSTALOADER_BIN`, `FFMPEG_BIN`, `PYTHON_BIN` | Override binaries on PATH. |
-| `OPENROUTER_MODEL` | Default summary model; overrides `openrouter_model` in config. |
-| `OPENROUTER_HTTP_REFERER`, `OPENROUTER_APP_TITLE` | Optional OpenRouter attribution headers. |
-| `IG_SUMMARIZE_CLI` | Optional; only if you invoke `python3 "$IG_SUMMARIZE_CLI" …` — must be the **script file path**, not `$HOME`. |
-
-## Cursor skill
-
-See [`SKILL.md`](./SKILL.md).
-
-## Limits and caveats
-
-- **Private posts** need Instaloader login or cookies (`--instaloader-arg` forwarding).
-- Transcription helper enforces a **~25 MB** audio limit; very long reels may need manual splitting.
-- Respect Instagram’s terms and rate limits; this tool is for personal/archival use cases.
+- Private Instagram posts may need Instaloader login/cookies (`--instaloader-arg`).
+- Very large audio may hit provider limits.
+- Respect Instagram’s terms and rate limits.
 
 ## License
 
