@@ -1,6 +1,6 @@
 ---
 name: ig-summarize
-description: Download an Instagram post/reel with Instaloader, transcribe via OpenAI audio API (transcribe_diarize helper), optionally summarize with OpenRouter (default openrouter/free).
+description: Download an Instagram post/reel with Instaloader, transcribe via OpenAI audio API (transcribe_diarize helper), optionally summarize with OpenRouter (default openrouter/free; config refresh-free / set-model).
 ---
 
 # ig-summarize
@@ -19,7 +19,11 @@ Use when the user wants a **transcript** or **optional summary** of an **Instagr
 2. **ffmpeg** on `PATH` or `FFMPEG_BIN`.
 3. **`OPENAI_API_KEY`** for transcription.
 4. **`transcribe_diarize.py`** at `~/.codex/skills/transcribe/scripts/` or `TRANSCRIBE_CLI`.
-5. Optional OpenRouter key: **`OPENROUTER_API_KEY`** or save with **`config save-openrouter`** to `~/.config/ig-summarize/config.json` (env overrides file).
+5. Optional OpenRouter: **`OPENROUTER_API_KEY`** or **`config save-openrouter`**. Optional default summary model: **`config set-model`** or **`OPENROUTER_MODEL`**. Default model if unset: **`openrouter/free`**. Run **`config refresh-free`** periodically to refresh the cached list of $0-priced model ids (Summarize-style; list-only, no probes).
+
+## Model resolution
+
+`--openrouter-model` → **`OPENROUTER_MODEL`** → **`openrouter_model`** in config → **`openrouter/free`**. Shorthand **`free`** → **`openrouter/free`**.
 
 ## CLI
 
@@ -39,7 +43,10 @@ Only if you shell-wrap **`python3 "$IG_SUMMARIZE_CLI" …`**: `IG_SUMMARIZE_CLI`
 ig-summarize "https://www.instagram.com/p/SHORTCODE/"
 ig-summarize "https://www.instagram.com/p/SHORTCODE/" --keep
 ig-summarize "https://www.instagram.com/p/SHORTCODE/" --out-dir ./out
-ig-summarize config save-openrouter --from-env   # after OPENROUTER_API_KEY is set
+ig-summarize config save-openrouter --from-env
+ig-summarize config refresh-free
+ig-summarize config list-free
+ig-summarize config set-model openrouter/free
 ig-summarize "https://www.instagram.com/p/SHORTCODE/" --summary
 ```
 

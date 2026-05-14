@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -24,6 +25,7 @@ INSTAGRAM_URL_RE = re.compile(
 
 DEFAULT_OPENROUTER_MODEL = "openrouter/free"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 DEFAULT_OPENROUTER_REFERER = "https://github.com/dahliasan/ig-summarize"
 DEFAULT_OPENROUTER_TITLE = "ig-summarize"
 
@@ -56,6 +58,58 @@ def resolve_openrouter_api_key() -> Optional[str]:
         return env
     key = str(load_user_config().get("openrouter_api_key", "")).strip()
     return key or None
+
+
+def normalize_openrouter_model(model: str) -> str:
+    m = model.strip()
+    if m.lower() == "free":
+        return "openrouter/free"
+    return m
+
+
+def default_openrouter_model() -> str:
+    env = os.getenv("OPENROUTER_MODEL", "").strip()
+    if env:
+        return env
+    raw = load_user_config().get("openrouter_model")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return DEFAULT_OPENROUTER_MODEL
+
+
+def resolved_openrouter_model(cli_value: Optional[str]) -> str:
+    if cli_value is not None and str(cli_value).strip() != "":
+        return normalize_openrouter_model(str(cli_value))
+    return normalize_openrouter_model(default_openrouter_model())
+
+
+def fetch_openrouter_free_model_ids() -> list[str]:
+    req = urllib.request.Request(
+        OPENROUTER_MODELS_URL,
+        headers={"User-Agent": "ig-summarize (https://github.com/dahliasan/ig-summarize)"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")
+        die(f"OpenRouter models HTTP {e.code}: {detail}")
+    except urllib.error.URLError as e:
+        die(f"OpenRouter models request failed: {e}")
+
+    out: list[str] = []
+    for m in payload.get("data") or []:
+        mid = m.get("id")
+        if not isinstance(mid, str) or not mid:
+            continue
+        pricing = m.get("pricing") or {}
+        p, c = pricing.get("prompt"), pricing.get("completion")
+        if p == "0" and c == "0":
+            out.append(mid)
+        elif mid.endswith(":free"):
+            out.append(mid)
+    return sorted(set(out))
 
 
 def write_user_config(updates: Dict[str, Any]) -> Path:
@@ -109,6 +163,28 @@ def run_config_command(argv: list[str]) -> None:
 
     p_path = sub.add_parser("path", help="Print the config file path and exit.")
 
+    p_refresh = sub.add_parser(
+        "refresh-free",
+        help=(
+            "Fetch OpenRouter models with $0 listed pricing and cache their ids in config "
+            "(similar to `summarize refresh-free`; list-only, no latency probes)."
+        ),
+    )
+
+    p_set = sub.add_parser(
+        "set-model",
+        help="Save default OpenRouter model id in config (overridden by OPENROUTER_MODEL / --openrouter-model).",
+    )
+    p_set.add_argument(
+        "model",
+        help="Model id (e.g. openrouter/free, google/gemini-2.0-flash-001:free). Shorthand: free → openrouter/free.",
+    )
+
+    p_list = sub.add_parser(
+        "list-free",
+        help="Print cached free model ids from the last refresh-free (first 60 lines).",
+    )
+
     args = p.parse_args(argv)
     if args.cmd == "path":
         print(config_path())
@@ -117,6 +193,38 @@ def run_config_command(argv: list[str]) -> None:
         key = read_openrouter_key_for_save(from_env=args.from_env)
         out = write_user_config({"openrouter_api_key": key})
         print(f"Saved OpenRouter API key to {out} (permissions 0600).")
+        return
+    if args.cmd == "refresh-free":
+        ids = fetch_openrouter_free_model_ids()
+        write_user_config(
+            {
+                "openrouter_free_model_ids": ids,
+                "openrouter_free_models_refreshed_at": int(time.time()),
+            }
+        )
+        print(f"Cached {len(ids)} OpenRouter models with listed $0 input/output pricing.")
+        print("Sample (up to 12):")
+        for mid in ids[:12]:
+            print(f"  {mid}")
+        print("Use `ig-summarize config list-free` for more, or `config set-model <id>` to pin a default.")
+        return
+    if args.cmd == "set-model":
+        mid = normalize_openrouter_model(args.model)
+        write_user_config({"openrouter_model": mid})
+        print(f"Saved default OpenRouter model to config: {mid}")
+        return
+    if args.cmd == "list-free":
+        raw = load_user_config().get("openrouter_free_model_ids")
+        if not isinstance(raw, list) or not raw:
+            die("No cached list. Run `ig-summarize config refresh-free` first.")
+        ts = load_user_config().get("openrouter_free_models_refreshed_at")
+        if ts is not None:
+            print(f"# refreshed_at: {ts}")
+        for mid in raw[:60]:
+            if isinstance(mid, str):
+                print(mid)
+        if len(raw) > 60:
+            print(f"# … {len(raw) - 60} more (see {config_path()})")
         return
     die(f"Unknown config command: {args.cmd}")
 
@@ -307,9 +415,9 @@ def parse_args() -> argparse.Namespace:
             "the transcribe_diarize OpenAI helper, and optionally summarize with OpenRouter."
         ),
         epilog=(
-            "Manage OpenRouter key on disk: "
-            "`%(prog)s config save-openrouter` or `%(prog)s config path`. "
-            "Environment OPENROUTER_API_KEY overrides the config file when set."
+            "Config: `%(prog)s config save-openrouter`, `config refresh-free`, `config set-model`, "
+            "`config list-free`, `config path`. "
+            "Env OPENROUTER_API_KEY overrides saved key; OPENROUTER_MODEL overrides saved default model."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -328,8 +436,13 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--openrouter-model",
-        default=os.environ.get("OPENROUTER_MODEL", DEFAULT_OPENROUTER_MODEL),
-        help=f"OpenRouter model id (default: {DEFAULT_OPENROUTER_MODEL} or $OPENROUTER_MODEL).",
+        default=None,
+        metavar="MODEL",
+        help=(
+            "OpenRouter model id for --summary. Shorthand: free → openrouter/free. "
+            "Default order: this flag, then $OPENROUTER_MODEL, then openrouter_model in "
+            f"{config_path()}, else {DEFAULT_OPENROUTER_MODEL}."
+        ),
     )
     p.add_argument(
         "--openrouter-referer",
@@ -419,7 +532,7 @@ def main() -> None:
             )
         summary = openrouter_summarize(
             api_key=key,
-            model=args.openrouter_model,
+            model=resolved_openrouter_model(args.openrouter_model),
             transcript=transcript_text,
             referer=args.openrouter_referer,
             title=args.openrouter_title,

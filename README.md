@@ -115,6 +115,26 @@ ig-summarize config path
 
 ---
 
+## Summarization model (OpenRouter)
+
+**Default for `--summary`:** **`openrouter/free`** — OpenRouter’s free-tier **router** (not one fixed weights snapshot).
+
+**Precedence (highest first):** `--openrouter-model` → **`OPENROUTER_MODEL`** → **`openrouter_model`** in `~/.config/ig-summarize/config.json` (via **`ig-summarize config set-model`**) → **`openrouter/free`**.
+
+Shorthand: **`--openrouter-model free`** means **`openrouter/free`**.
+
+### Like `summarize refresh-free` ([install.md](https://github.com/steipete/summarize/blob/main/docs/install.md))
+
+After you set **`OPENROUTER_API_KEY`**, Summarize recommends **`summarize refresh-free`** to refresh the free-model preset. **`ig-summarize config refresh-free`** does a **lighter** step: it calls OpenRouter’s public **`/api/v1/models`** endpoint (no key required), finds models with **listed $0** prompt and completion pricing, and stores **`openrouter_free_model_ids`** plus a timestamp in your config. It does **not** run summarize-style latency probes or ranking.
+
+```bash
+ig-summarize config refresh-free
+ig-summarize config list-free
+ig-summarize config set-model google/gemma-3-4b-it:free   # example pinned default
+```
+
+---
+
 ## Troubleshooting
 
 ### `can't find '__main__' module in '/Users/…'`
@@ -136,7 +156,7 @@ unset IG_SUMMARIZE_CLI
 3. Take the **largest `.mp4`** (handles carousels).
 4. **ffmpeg** extracts mono AAC for the transcription API.
 5. **`transcribe_diarize.py … --stdout`** produces the transcript.
-6. With **`--summary`**, resolve OpenRouter key from **`OPENROUTER_API_KEY`** (if set) else **`openrouter_api_key`** in **`~/.config/ig-summarize/config.json`**, then call OpenRouter **`/api/v1/chat/completions`** (default model **`openrouter/free`**).
+6. With **`--summary`**, call OpenRouter chat completions using the **resolved model** (default **`openrouter/free`**; see README “Summarization model”).
 
 ## Environment
 
@@ -147,7 +167,8 @@ unset IG_SUMMARIZE_CLI
 | `TRANSCRIBE_CLI` | Path to `transcribe_diarize.py` if not under `~/.codex/skills/transcribe/scripts/`. |
 | `CODEX_HOME` | Base for default transcribe helper (default `~/.codex`). |
 | `INSTALOADER_BIN`, `FFMPEG_BIN`, `PYTHON_BIN` | Override binaries on PATH. |
-| `OPENROUTER_MODEL`, `OPENROUTER_HTTP_REFERER`, `OPENROUTER_APP_TITLE` | OpenRouter defaults. |
+| `OPENROUTER_MODEL` | Default summary model; overrides `openrouter_model` in config. |
+| `OPENROUTER_HTTP_REFERER`, `OPENROUTER_APP_TITLE` | Optional OpenRouter attribution headers. |
 | `IG_SUMMARIZE_CLI` | Optional; only if you invoke `python3 "$IG_SUMMARIZE_CLI" …` — must be the **script file path**, not `$HOME`. |
 
 ## Cursor skill
