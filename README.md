@@ -40,7 +40,7 @@ Then use the global command **`ig-summarize`**.
 
 | Order | Provider | What you need |
 |------:|----------|----------------|
-| 1 | **Local `whisper-cli`** | `whisper-cli` on `PATH` (Homebrew: `brew install whisper-cpp`), plus **`SUMMARIZE_WHISPER_CPP_MODEL_PATH`** pointing at a `.gguf` / `.bin` model file. Optional: **`SUMMARIZE_WHISPER_CPP_BINARY`**, or disable with **`SUMMARIZE_DISABLE_LOCAL_WHISPER_CPP=1`**. |
+| 1 | **Local `whisper-cli`** | `whisper-cli` on `PATH` (Homebrew: `brew install whisper-cpp`). **Weights are resolved automatically:** `ig-summarize` searches common dirs (e.g. `~/.local/share/ig-summarize/models`, `~/.summarize/models`, `~/whisper.cpp/models`), reads optional **`whisper_cpp_model_path`** from `~/.config/ig-summarize/config.json` (`ig-summarize config set-whisper-model /path/to.gguf`), then **`SUMMARIZE_WHISPER_CPP_MODEL_PATH`** if set. If nothing is found, it **downloads `ggml-tiny.en.bin` once** to the XDG data dir (skip with **`IG_SUMMARIZE_SKIP_AUTO_WHISPER_MODEL_DOWNLOAD=1`**). Optional: **`SUMMARIZE_WHISPER_CPP_BINARY`**, or disable local with **`SUMMARIZE_DISABLE_LOCAL_WHISPER_CPP=1`**. |
 | 2 | **Groq** | **`GROQ_API_KEY`** (OpenAI-compatible Whisper API). Optional: **`IG_GROQ_TRANSCRIBE_MODEL`** (default `whisper-large-v3`). |
 | 3 | **AssemblyAI** | **`ASSEMBLYAI_API_KEY`** |
 | 4 | **OpenAI** | **`OPENAI_API_KEY`**. Optional: **`OPENAI_WHISPER_BASE_URL`** (default `https://api.openai.com/v1`), **`IG_OPENAI_TRANSCRIBE_MODEL`** (default `whisper-1`). |
@@ -93,7 +93,8 @@ Artifacts: by default, **`SHORTCODE.transcript.txt`** in the current directory (
 | `ASSEMBLYAI_API_KEY` | Cloud transcription fallback. |
 | `OPENAI_API_KEY` | Cloud transcription fallback; also used if only OpenAI is set. |
 | `OPENAI_WHISPER_BASE_URL` | Custom OpenAI-compatible STT endpoint. |
-| `SUMMARIZE_WHISPER_CPP_MODEL_PATH` | Local whisper model file (same as Summarize). |
+| `SUMMARIZE_WHISPER_CPP_MODEL_PATH` | Force a specific local whisper weights file (optional; auto-discovery + one-time default download otherwise). |
+| `IG_SUMMARIZE_SKIP_AUTO_WHISPER_MODEL_DOWNLOAD` / `SUMMARIZE_SKIP_AUTO_WHISPER_MODEL_DOWNLOAD` | Set to `1` to never auto-download `ggml-tiny.en.bin` when no weights are found. |
 | `SUMMARIZE_WHISPER_CPP_BINARY` | Local binary override (same as Summarize). |
 | `SUMMARIZE_DISABLE_LOCAL_WHISPER_CPP` | Set to `1` to skip local whisper. |
 | `OPENROUTER_API_KEY` | Summary step; optional if saved in config. |

@@ -187,6 +187,18 @@ def run_config_command(argv: list[str]) -> None:
         help="Print cached free model ids from the last refresh-free (first 60 lines).",
     )
 
+    p_whisper = sub.add_parser(
+        "set-whisper-model",
+        help=(
+            "Save whisper.cpp weights path in config (used when SUMMARIZE_WHISPER_CPP_MODEL_PATH "
+            "is unset). Same key works alongside steipete/summarize-style setups."
+        ),
+    )
+    p_whisper.add_argument(
+        "path",
+        help="Path to a .gguf or ggml-*.bin model file.",
+    )
+
     args = p.parse_args(argv)
     if args.cmd == "path":
         print(config_path())
@@ -227,6 +239,16 @@ def run_config_command(argv: list[str]) -> None:
                 print(mid)
         if len(raw) > 60:
             print(f"# … {len(raw) - 60} more (see {config_path()})")
+        return
+    if args.cmd == "set-whisper-model":
+        mp = Path(args.path).expanduser()
+        if not mp.is_file():
+            die(f"Not a file: {mp}")
+        suf = mp.suffix.lower()
+        if suf not in (".bin", ".gguf"):
+            die("Expected a .bin (ggml-*) or .gguf Whisper weights file.")
+        write_user_config({"whisper_cpp_model_path": str(mp.resolve())})
+        print(f"Saved whisper_cpp_model_path to config: {mp.resolve()}")
         return
     die(f"Unknown config command: {args.cmd}")
 
@@ -382,7 +404,7 @@ def parse_args() -> argparse.Namespace:
         ),
         epilog=(
             "Config: `%(prog)s config save-openrouter`, `config refresh-free`, `config set-model`, "
-            "`config list-free`, `config path`. "
+            "`config set-whisper-model`, `config list-free`, `config path`. "
             "Env OPENROUTER_API_KEY overrides saved key; OPENROUTER_MODEL overrides saved default model."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,

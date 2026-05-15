@@ -1,6 +1,6 @@
 ---
 name: ig-summarize
-description: Instagram /p/ or /reel/ URL → download (Instaloader) → Summarize-style transcription (whisper-cli → Groq → AssemblyAI → OpenAI) → optional OpenRouter summary (default openrouter/free).
+description: Instagram /p/ or /reel/ URL → download (Instaloader) → Summarize-style transcription (local whisper with auto model resolve/download → Groq → AssemblyAI → OpenAI) → optional OpenRouter summary (default openrouter/free).
 ---
 
 # ig-summarize
@@ -18,7 +18,7 @@ Use when the user wants a **transcript** or **optional summary** of an **Instagr
 
 1. **`instaloader`** and **`ffmpeg`** on `PATH` (or `*_BIN` overrides).
 2. **At least one transcription path** (same tiers as Summarize’s media docs, minus Gemini/FAL):
-   - Local: **`whisper-cli`** + **`SUMMARIZE_WHISPER_CPP_MODEL_PATH`**
+   - Local: **`whisper-cli`** on `PATH`; weights are **auto-discovered** (XDG `ig-summarize/models`, `~/.summarize/models`, etc.) or **downloaded once** (`ggml-tiny.en.bin`) unless `IG_SUMMARIZE_SKIP_AUTO_WHISPER_MODEL_DOWNLOAD=1`. Optional: **`SUMMARIZE_WHISPER_CPP_MODEL_PATH`**, or **`ig-summarize config set-whisper-model /path/to.bin`**
    - Or cloud: **`GROQ_API_KEY`**, **`ASSEMBLYAI_API_KEY`**, or **`OPENAI_API_KEY`**
 3. For **`--summary`**: **`OPENROUTER_API_KEY`** or `config save-openrouter`.
 
@@ -38,6 +38,6 @@ ig-summarize config set-model openrouter/free
 
 ## Failure handling
 
-- No transcript: list which providers were tried; suggest `GROQ_API_KEY` or `OPENAI_API_KEY` or local whisper model path — never ask for pasted secrets in chat.
+- No transcript: list which providers were tried; local tier needs `whisper-cli` (weights auto-resolve or one-time download). Cloud: suggest `GROQ_API_KEY` or `OPENAI_API_KEY` — never ask for pasted secrets in chat.
 - Missing OpenRouter key for `--summary`: suggest `config save-openrouter`.
 - Instaloader failures: `--instaloader-arg` for login/cookies.

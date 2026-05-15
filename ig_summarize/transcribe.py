@@ -8,6 +8,7 @@ import random
 import shutil
 import string
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -41,11 +42,240 @@ def _whisper_cpp_binary() -> Optional[str]:
     return shutil.which("whisper-cli") or shutil.which("whisper-cpp")
 
 
+def _ig_config_json_path() -> Path:
+    xdg = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    base = (
+        Path(xdg).expanduser() / "ig-summarize"
+        if xdg
+        else Path.home() / ".config" / "ig-summarize"
+    )
+    return base / "config.json"
+
+
+def _whisper_model_path_from_ig_config() -> Optional[str]:
+    p = _ig_config_json_path()
+    if not p.is_file():
+        return None
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    for key in ("whisper_cpp_model_path", "summarize_whisper_cpp_model_path"):
+        val = raw.get(key)
+        if isinstance(val, str) and val.strip():
+            exp = Path(val).expanduser()
+            if exp.is_file():
+                return str(exp)
+    return None
+
+
+def _xdg_data_home() -> Path:
+    xdg = os.environ.get("XDG_DATA_HOME", "").strip()
+    if xdg:
+        return Path(xdg).expanduser()
+    return Path.home() / ".local" / "share"
+
+
+def _discover_model_search_roots() -> list[Path]:
+    roots: list[Path] = []
+    seen: set[str] = set()
+
+    def add(p: Path) -> None:
+        key = str(p)
+        if key not in seen:
+            seen.add(key)
+            roots.append(p)
+
+    add(_xdg_data_home() / "ig-summarize" / "models")
+    add(Path.home() / ".local" / "share" / "ig-summarize" / "models")
+    add(Path.home() / "whisper.cpp" / "models")
+    add(Path.home() / ".cache" / "whisper")
+    add(Path.home() / ".summarize" / "models")
+
+    bin_p = _whisper_cpp_binary()
+    if bin_p:
+        bp = Path(bin_p).resolve()
+        if "Cellar" in bp.parts:
+            try:
+                i = bp.parts.index("Cellar")
+                if i + 2 < len(bp.parts):
+                    cellar_pkg = Path(*bp.parts[: i + 3])
+                    add(cellar_pkg / "share" / "whisper-cpp")
+            except (ValueError, IndexError):
+                pass
+        add(bp.parent / "models")
+
+    summarize_home = os.environ.get("SUMMARIZE_HOME", "").strip()
+    if summarize_home:
+        add(Path(summarize_home).expanduser() / "models")
+
+    return roots
+
+
+def _is_whisper_weights_file(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    n = path.name.lower()
+    if n.startswith("."):
+        return False
+    if not (n.endswith(".bin") or n.endswith(".gguf")):
+        return False
+    if n.endswith(".gguf"):
+        return True
+    return "ggml-" in n
+
+
+def _model_preference_rank(name: str) -> int:
+    """Lower is better (prefer larger models when multiple are installed)."""
+    n = name.lower()
+    ordered = (
+        "large-v3-turbo",
+        "large-v3",
+        "large-v2",
+        "large-v1",
+        "large",
+        "medium",
+        "small",
+        "base",
+        "tiny",
+    )
+    for i, key in enumerate(ordered):
+        if key in n:
+            return i
+    return len(ordered)
+
+
+def _discovered_whisper_models() -> list[Path]:
+    found: list[Path] = []
+    for root in _discover_model_search_roots():
+        if not root.is_dir():
+            continue
+        for pattern in ("*.bin", "*.gguf"):
+            for p in root.glob(pattern):
+                if _is_whisper_weights_file(p):
+                    found.append(p)
+        try:
+            for sub in root.iterdir():
+                if sub.is_dir():
+                    for pattern in ("*.bin", "*.gguf"):
+                        for p in sub.glob(pattern):
+                            if _is_whisper_weights_file(p):
+                                found.append(p)
+        except OSError:
+            pass
+    uniq: dict[str, Path] = {}
+    for p in found:
+        try:
+            uniq[str(p.resolve())] = p
+        except OSError:
+            continue
+    return list(uniq.values())
+
+
+def _pick_best_whisper_model(candidates: list[Path]) -> Optional[Path]:
+    if not candidates:
+        return None
+    return sorted(
+        candidates,
+        key=lambda p: (_model_preference_rank(p.name), -p.stat().st_size),
+    )[0]
+
+
+_DEFAULT_WHISPER_REMOTE = (
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin"
+)
+_DEFAULT_WHISPER_FILENAME = "ggml-tiny.en.bin"
+_MIN_MODEL_BYTES = 8_000_000
+
+
+def _skip_auto_whisper_download() -> bool:
+    for k in (
+        "IG_SUMMARIZE_SKIP_AUTO_WHISPER_MODEL_DOWNLOAD",
+        "SUMMARIZE_SKIP_AUTO_WHISPER_MODEL_DOWNLOAD",
+    ):
+        v = os.environ.get(k, "").strip().lower()
+        if v in ("1", "true", "yes"):
+            return True
+    return False
+
+
+def _download_default_whisper_model(dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(dest.suffix + ".download")
+    if tmp.is_file():
+        tmp.unlink()
+    print(
+        f"ig-summarize: downloading default Whisper model to {dest} (~75MB, one-time)…",
+        file=sys.stderr,
+    )
+    req = urllib.request.Request(
+        _DEFAULT_WHISPER_REMOTE,
+        headers={"User-Agent": "ig-summarize (https://github.com/dahliasan/ig-summarize)"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            chunk = 256 * 1024
+            with open(tmp, "wb") as out:
+                while True:
+                    block = resp.read(chunk)
+                    if not block:
+                        break
+                    out.write(block)
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")[:500]
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise TranscriptionError(f"model download HTTP {e.code}: {detail}") from e
+    except urllib.error.URLError as e:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise TranscriptionError(f"model download failed: {e}") from e
+
+    try:
+        sz = tmp.stat().st_size
+    except OSError as e:
+        raise TranscriptionError(f"model download incomplete: {e}") from e
+    if sz < _MIN_MODEL_BYTES:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise TranscriptionError("downloaded model file too small; check network and retry")
+
+    os.replace(tmp, dest)
+
+
 def _whisper_cpp_model() -> Optional[str]:
     for k in ("SUMMARIZE_WHISPER_CPP_MODEL_PATH", "IG_WHISPER_CPP_MODEL"):
         p = os.environ.get(k, "").strip()
         if p and Path(p).expanduser().is_file():
             return str(Path(p).expanduser())
+    cfg = _whisper_model_path_from_ig_config()
+    if cfg:
+        return cfg
+    best = _pick_best_whisper_model(_discovered_whisper_models())
+    if best:
+        return str(best)
+    if _skip_auto_whisper_download() or _disabled_local_whisper():
+        return None
+    if not _whisper_cpp_binary():
+        return None
+    dest = _xdg_data_home() / "ig-summarize" / "models" / _DEFAULT_WHISPER_FILENAME
+    if dest.is_file() and dest.stat().st_size >= _MIN_MODEL_BYTES:
+        return str(dest)
+    try:
+        _download_default_whisper_model(dest)
+    except TranscriptionError:
+        return None
+    if dest.is_file() and dest.stat().st_size >= _MIN_MODEL_BYTES:
+        return str(dest)
     return None
 
 
@@ -278,7 +508,10 @@ def transcribe_auto(audio_path: Path, work_dir: Path) -> Tuple[str, str]:
             errors.append(f"{label}: {e}")
     msg_lines = [
         "No transcription provider succeeded. Summarize-style setup:",
-        "  Local: install whisper-cli + set SUMMARIZE_WHISPER_CPP_MODEL_PATH (and optionally SUMMARIZE_WHISPER_CPP_BINARY).",
+        "  Local: install whisper-cli on PATH; ig-summarize looks for weights under XDG data dirs "
+        "(e.g. ~/.local/share/ig-summarize/models), ~/.summarize/models, ~/whisper.cpp/models, "
+        "or config whisper_cpp_model_path; otherwise downloads ggml-tiny.en.bin once unless "
+        "IG_SUMMARIZE_SKIP_AUTO_WHISPER_MODEL_DOWNLOAD=1. Optional override: SUMMARIZE_WHISPER_CPP_MODEL_PATH.",
         "  Cloud (any one): GROQ_API_KEY, ASSEMBLYAI_API_KEY, or OPENAI_API_KEY (optional OPENAI_WHISPER_BASE_URL).",
         "  Disable local: SUMMARIZE_DISABLE_LOCAL_WHISPER_CPP=1",
         "Attempts:",
