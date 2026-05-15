@@ -81,7 +81,7 @@ ig-summarize "https://www.instagram.com/p/SHORTCODE/"
 ig-summarize "https://www.instagram.com/p/SHORTCODE/" --summary
 ```
 
-Artifacts: by default, **`SHORTCODE.transcript.txt`** in the current directory (and **`SHORTCODE.summary.txt`** with `--summary`). Use **`--keep`** or **`--out-dir`** to keep downloads.
+Artifacts: by default, **`SHORTCODE.transcript.txt`** in the **current directory**. If your shell cwd is **home** (`~`), files go under **`~/Downloads/`** instead so `$HOME` is not littered. **`--print-transcript`** echoes the transcript to stdout after saving. Use **`--keep`** or **`--out-dir`** to control staging and output location.
 
 ---
 
@@ -106,6 +106,10 @@ Artifacts: by default, **`SHORTCODE.transcript.txt`** in the current directory (
 ---
 
 ## Troubleshooting
+
+### Instaloader `graphql/query` 403
+
+Instagram often returns **403** on anonymous GraphQL calls even when the **video still downloads**. You will see a single **Warning** from `ig-summarize` instead of the long Instaloader retry line. If the run **fails** entirely, use **`--instaloader-arg`** with Instaloader login or cookies (see Instaloader docs).
 
 ### `can't find '__main__' module in '/Users/…'`
 

@@ -24,6 +24,10 @@ INSTAGRAM_URL_RE = re.compile(
     r"(?:https?://)?(?:www\.)?(?:instagram\.com|instagr\.am)/(?:p|reel|reels|tv)/([^/?#]+)",
     re.IGNORECASE,
 )
+_INSTAGRAM_GRAPHQL_403_RE = re.compile(
+    r"JSON Query to graphql/query:\s*403 Forbidden|graphql/query.*403 Forbidden",
+    re.IGNORECASE,
+)
 
 DEFAULT_OPENROUTER_MODEL = "openrouter/free"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -335,7 +339,52 @@ def run_instaloader(instaloader: str, shortcode: str, cwd: Path, extra_args: lis
         "--",
         f"-{shortcode}",
     ]
-    subprocess.run(cmd, cwd=str(cwd), check=True)
+    proc = subprocess.run(
+        cmd,
+        cwd=str(cwd),
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    err = (proc.stderr or "").strip()
+    out = (proc.stdout or "").strip()
+    if proc.returncode != 0:
+        if out:
+            print(out, file=sys.stderr)
+        if err:
+            print(err, file=sys.stderr)
+        proc.check_returncode()
+
+    graphql_403 = False
+    kept_lines: list[str] = []
+    for line in err.splitlines():
+        if _INSTAGRAM_GRAPHQL_403_RE.search(line):
+            graphql_403 = True
+            continue
+        kept_lines.append(line)
+    if graphql_403:
+        warn(
+            "Instagram GraphQL returned 403 (common for anonymous Instaloader); "
+            "download still succeeded. If fetches fail, use --instaloader-arg --login USER "
+            "or Instaloader session/cookies."
+        )
+    tail = "\n".join(kept_lines).strip()
+    if tail:
+        print(tail, file=sys.stderr)
+
+
+def default_artifact_dir() -> Path:
+    """
+    When cwd is the user's home directory, write transcripts under ~/Downloads
+    instead of cluttering $HOME with *.transcript.txt.
+    """
+    cwd = Path.cwd().resolve()
+    home = Path.home().resolve()
+    if cwd == home:
+        d = (home / "Downloads").resolve()
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+    return cwd
 
 
 def openrouter_summarize(
@@ -445,12 +494,20 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--out-dir",
         type=Path,
-        help="Directory for transcript (and summary) files. Default: temp dir unless --keep.",
+        help=(
+            "Directory for transcript (and summary) files. "
+            "Default: current directory, or ~/Downloads when cwd is home (unless --keep)."
+        ),
     )
     p.add_argument(
         "--keep",
         action="store_true",
         help="Keep downloaded media and work directory (implies stable --out-dir default).",
+    )
+    p.add_argument(
+        "--print-transcript",
+        action="store_true",
+        help="After saving, print the transcript body to stdout (file is still written).",
     )
     p.add_argument(
         "--instaloader-arg",
@@ -481,7 +538,7 @@ def main() -> None:
     else:
         staging = Path(tempfile.mkdtemp(prefix=f"ig-sum-{shortcode}-"))
         staging_ephemeral = True
-        artifact_dir = Path.cwd()
+        artifact_dir = default_artifact_dir()
 
     download_dir = staging / "download"
     download_dir.mkdir(parents=True, exist_ok=True)
@@ -510,6 +567,9 @@ def main() -> None:
     transcript_path = artifact_dir / f"{shortcode}.transcript.txt"
     transcript_path.write_text(transcript_text, encoding="utf-8")
     print(f"Wrote transcript: {transcript_path}")
+    if args.print_transcript:
+        print("\n--- Transcript ---\n")
+        print(transcript_text)
 
     if args.summary:
         key = resolve_openrouter_api_key()

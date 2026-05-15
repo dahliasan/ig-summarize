@@ -30,14 +30,17 @@ Use when the user wants a **transcript** or **optional summary** of an **Instagr
 
 ```bash
 ig-summarize "https://www.instagram.com/p/SHORTCODE/"
+ig-summarize "https://www.instagram.com/p/SHORTCODE/" --print-transcript
 ig-summarize "https://www.instagram.com/p/SHORTCODE/" --summary
 ig-summarize config save-openrouter --from-env
 ig-summarize config refresh-free
 ig-summarize config set-model openrouter/free
 ```
 
+Default transcript path is cwd, or **`~/Downloads`** when cwd is home; **`--out-dir`** overrides.
+
 ## Failure handling
 
 - No transcript: list which providers were tried; local tier needs `whisper-cli` (weights auto-resolve or one-time download). Cloud: suggest `GROQ_API_KEY` or `OPENAI_API_KEY` — never ask for pasted secrets in chat.
 - Missing OpenRouter key for `--summary`: suggest `config save-openrouter`.
-- Instaloader failures: `--instaloader-arg` for login/cookies.
+- Instaloader failures: `--instaloader-arg` for login/cookies. Anonymous GraphQL 403 is common even when download succeeds; `ig-summarize` collapses that noise to one warning.
